@@ -12,7 +12,8 @@ class RrDebugger(Cmd):
         Cmd.__init__(self)
         self.prompt = 'rr_dbg>'
         self.vmlinux = 'vmlinux'
-        self.gdb_exec = 'gdb'
+        self.vmlinux_strip_prefix = None
+        self.gdb_exec = '/usr/bin/gdb'
         self.qemu_exec = 'qemu'
         self.qemu_args = ['-s', '-no-reboot']
         self.qemu_replay_keyword = '-replay'
@@ -41,6 +42,10 @@ class RrDebugger(Cmd):
     def do_set_vmlinux(self, line):
         '''Specify the vmlinux file.'''
         self.vmlinux = line
+
+    def do_set_vmlinux_strip_prefix(self, line):
+        '''Specify the vmlinux file.'''
+        self.vmlinux_strip_prefix = line
 
     def do_set_gdb(self, line):
         '''Specify the path to gdb.'''
@@ -108,12 +113,50 @@ class RrDebugger(Cmd):
         self.gdb_pexpect.expect('\(gdb\)')
         #logging.debug(self.gdb_expect.before)
 
-    def do_run_till_live(self, line):
-        pass
+    def strip_prefix(self, lin):
+        if (self.vmlinux_strip_prefix is None):
+            return lin
+        else:
+            return "at " + lin.split(self.vmlinux_strip_prefix)[1]
 
+    def print_wp_hit(self, gdb_out):
+        print ""
+        print "\n".join(gdb_out[2:6])
+        for lin in gdb_out[6:]:
+            if (lin.strip().startswith('at')):
+                print self.strip_prefix(lin)
+                break
+            else:
+                print lin
+
+    def print_bt(self):
+        print "\n".join(self.gdb_pexpect.before.splitlines()[2:])
+
+    def do_run_till_live(self, line):
+        '''Run the vm printing all wp hits untill switch to live mode.'''
+
+        count = 0
+        while(count < 5):
+            self.gdb_pexpect.sendline('c')
+            self.gdb_pexpect.expect('\(gdb\)')
+
+            gdb_out = self.gdb_pexpect.before.splitlines()
+            if (len(gdb_out) == 3):
+                #qemu process died due to entry into live mode
+                #FIXME this is an assumption
+                break
+
+            self.print_wp_hit(gdb_out)
+            #TODO enable bt printing
+            #print "Backtrace:"
+            #self.gdb_pexpect.sendline('bt')
+            #self.gdb_pexpect.expect('\(gdb\)')
+            #self.print_bt()
+
+            count += 1
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     dbg = RrDebugger()
     if os.path.exists('.rrdebuginit'):
         dbg.read_init_file('.rrdebuginit')
