@@ -23,6 +23,8 @@ class RrDebugger(Cmd):
         self.qemu_process = None
         self.gdb_pexpect = None
         self.qemu_cwd = None
+        self.executable = None
+        self.gdb_macros = None
 
     def read_init_file(self, filename):
         f = open(filename, 'r')
@@ -43,13 +45,32 @@ class RrDebugger(Cmd):
         '''Specify the vmlinux file.'''
         self.vmlinux = line
 
+    def do_set_gdb_macros(self, line):
+        self.gdb_macros = line
+
     def do_set_vmlinux_strip_prefix(self, line):
-        '''Specify the vmlinux file.'''
         self.vmlinux_strip_prefix = line
+
+    def do_set_executable(self, line):
+        self.executable = line
 
     def do_set_gdb(self, line):
         '''Specify the path to gdb.'''
         self.gdb_exec = line
+
+    def use_vmlinux(self):
+        self.gdb_pexpect.sendline('file ' + self.vmlinux)
+        self.gdb_pexpect.expect('y or n')
+        self.gdb_pexpect.sendline('y')
+        self.gdb_pexpect.expect('\(gdb\)')
+        logging.debug(self.gdb_pexpect.before)
+
+    def use_executable(self):
+        self.gdb_pexpect.sendline('file ' + executable)
+        self.gdb_pexpect.expect('y or n')
+        self.gdb_pexpect.sendline('y')
+        self.gdb_pexpect.expect('\(gdb\)')
+        logging.debug(self.gdb_pexpect.before)
 
     def do_set_qemu(self, line):
         '''Specify the path to qemu and any additional arguments.'''
@@ -92,26 +113,44 @@ class RrDebugger(Cmd):
             self.gdb_pexpect = pexpect.spawn(self.gdb_exec)
             self.gdb_pexpect.expect('\(gdb\)')
 
+        
+        if (self.gdb_macros is not None):
+            self.gdb_pexpect.sendline('source ' + self.gdb_macros)
+            self.gdb_pexpect.expect('\(gdb\)')
+            
         #self.gdb_pexpect.interact()
         self.gdb_pexpect.sendline(self.gdb_connect_cmd)
         self.gdb_pexpect.expect('\(gdb\)')
 
         logging.debug(self.gdb_pexpect.before)
+        self.use_vmlinux()
         
         #self.gdb_pexpect.interact()
-        self.gdb_pexpect.sendline('file ' + self.vmlinux)
-        self.gdb_pexpect.expect('y or n')
-        self.gdb_pexpect.sendline('y')
-        self.gdb_pexpect.expect('\(gdb\)')
-        logging.debug(self.gdb_pexpect.before)
 
-    def do_watch(self, line):
+    def do_watchk(self, line):
         '''watch [var_name]
         Watch the specified kernel variable.'''
 
         self.gdb_pexpect.sendline('watch ' + line)
         self.gdb_pexpect.expect('\(gdb\)')
         #logging.debug(self.gdb_expect.before)
+
+    def gdb_execute(cmd):
+        self.gdb_pexpect.sendline(cmd)
+        self.gdb_pexpect.expect('\(gdb\)')
+        return self.gdb_pexpect.before
+
+    def do_watchu(self, line):
+        '''Watch [var_name]
+        Watch the specified user variable.'''
+        # First set a breakpoint at _start of the exec
+        # Now when this bp is hit for the first time, set a wp on the req
+        # var. Now, when this wp gets hit, see if bt is meaningful. If
+        # yes, print it else ignore. Do this till either u go live or
+        # you get another hit at _start.
+        # Also, to count bp hit, compare the 50 bytes at _start in ram
+        # to those in the exec (got from gdb initially).
+
 
     def strip_prefix(self, lin):
         if (self.vmlinux_strip_prefix is None):
@@ -156,7 +195,7 @@ class RrDebugger(Cmd):
             count += 1
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     dbg = RrDebugger()
     if os.path.exists('.rrdebuginit'):
         dbg.read_init_file('.rrdebuginit')
