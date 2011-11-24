@@ -25,6 +25,7 @@ class RrDebugger(Cmd):
         self.qemu_cwd = None
         self.executable = None
         self.gdb_macros = None
+        self.executable_start_dump = None
 
     def read_init_file(self, filename):
         f = open(filename, 'r')
@@ -51,8 +52,29 @@ class RrDebugger(Cmd):
     def do_set_vmlinux_strip_prefix(self, line):
         self.vmlinux_strip_prefix = line
 
+    def gdb_execute(self, cmd, timeout=9999):
+        self.gdb_pexpect.sendline(cmd)
+        self.gdb_pexpect.expect('\(gdb\)', timeout)
+        logging.debug(self.gdb_pexpect.before)
+        return self.gdb_pexpect.before.splitlines()
+
+    def get_start_dump(self, executable):
+        gdb_new = pexpect.spawn(self.gdb_exec + ' ' + executable)
+        gdb_new.expect('\(gdb\)')
+        gdb_new.sendline('x/10x _start')
+        gdb_new.expect('\(gdb\)')
+
+        res = ""
+        for lin in gdb_new.before.splitlines()[1:]:
+            res += "".join(lin[lin.find(":")+1:].strip().split())
+
+        gdb_new.kill(0)
+        return res
+
     def do_set_executable(self, line):
         self.executable = line
+        self.executable_start_dump = self.get_start_dump(line)
+        logging.debug("executable_start_dump =" + self.executable_start_dump)
 
     def do_set_gdb(self, line):
         '''Specify the path to gdb.'''
@@ -66,7 +88,7 @@ class RrDebugger(Cmd):
         logging.debug(self.gdb_pexpect.before)
 
     def use_executable(self):
-        self.gdb_pexpect.sendline('file ' + executable)
+        self.gdb_pexpect.sendline('file ' + self.executable)
         self.gdb_pexpect.expect('y or n')
         self.gdb_pexpect.sendline('y')
         self.gdb_pexpect.expect('\(gdb\)')
@@ -106,7 +128,7 @@ class RrDebugger(Cmd):
                 stdout = subprocess.PIPE, stdin = subprocess.PIPE,
                 stderr = subprocess.PIPE)
 
-        time.sleep(5)
+        time.sleep(10)
         #logging.debug(self.qemu_process.stdout.read())
         
         if (self.gdb_pexpect is None):
@@ -123,7 +145,6 @@ class RrDebugger(Cmd):
         self.gdb_pexpect.expect('\(gdb\)')
 
         logging.debug(self.gdb_pexpect.before)
-        self.use_vmlinux()
         
         #self.gdb_pexpect.interact()
 
@@ -131,14 +152,23 @@ class RrDebugger(Cmd):
         '''watch [var_name]
         Watch the specified kernel variable.'''
 
+        self.use_vmlinux()
         self.gdb_pexpect.sendline('watch ' + line)
         self.gdb_pexpect.expect('\(gdb\)')
         #logging.debug(self.gdb_expect.before)
 
-    def gdb_execute(cmd):
-        self.gdb_pexpect.sendline(cmd)
-        self.gdb_pexpect.expect('\(gdb\)')
-        return self.gdb_pexpect.before
+    def is_valid_exec_dump(self, dump):
+        res = ""
+        for lin in dump[1:]:
+            res += "".join(lin[lin.find(":")+1:].strip().split())
+
+        return (res == self.executable_start_dump)
+
+    def is_valid_bt(self, bt):
+        for lin in bt[1:]:
+            if (lin.find('??') > -1):
+                return False
+        return True
 
     def do_watchu(self, line):
         '''Watch [var_name]
@@ -150,7 +180,30 @@ class RrDebugger(Cmd):
         # you get another hit at _start.
         # Also, to count bp hit, compare the 50 bytes at _start in ram
         # to those in the exec (got from gdb initially).
+        self.use_executable()
+        self.gdb_execute('break _start')
 
+        seen_bp = False
+        while(True):
+            hit = self.gdb_execute('c')
+            if (hit[3].startswith('Breakpoint')):
+                # bp hit, verify
+                if (self.is_valid_exec_dump(self.gdb_execute('x/10x _start'))):
+                    if seen_bp:
+                        return
+                    else:
+                        seen_bp = True
+                        self.gdb_execute('watch ' + line)
+                continue
+            
+            if (hit[2].startswith('Hardware watchpoint')): # wp hit
+                if (self.is_valid_bt(self.gdb_execute('bt'))):
+                    self.print_wp_hit(hit)
+                    #TODO print bt
+                continue
+
+            if (hit[2].startswith('Remote connection closed')):
+                return
 
     def strip_prefix(self, lin):
         if (self.vmlinux_strip_prefix is None):
@@ -195,7 +248,7 @@ class RrDebugger(Cmd):
             count += 1
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.ERROR)
     dbg = RrDebugger()
     if os.path.exists('.rrdebuginit'):
         dbg.read_init_file('.rrdebuginit')
