@@ -12,7 +12,7 @@ class RrDebugger(Cmd):
         Cmd.__init__(self)
         self.prompt = 'rr_dbg>'
         self.vmlinux = 'vmlinux'
-        self.vmlinux_strip_prefix = None
+        self.vmlinux_strip_prefix = ''
         self.gdb_exec = '/usr/bin/gdb'
         self.qemu_exec = 'qemu'
         self.qemu_args = ['-s', '-no-reboot']
@@ -113,6 +113,10 @@ class RrDebugger(Cmd):
         '''Specify the qcow2 image file.'''
         self.image = line
 
+    def gdb_init(self):
+        #TODO read these from init file
+        self.gdb_execute('set pagination off')
+
     def do_start(self, line):
         '''Start qemu and attach gdb to it.'''
         if (self.qemu_process is not None and self.qemu_process.poll() is None):
@@ -135,6 +139,7 @@ class RrDebugger(Cmd):
             self.gdb_pexpect = pexpect.spawn(self.gdb_exec)
             self.gdb_pexpect.expect('\(gdb\)')
 
+        self.gdb_init()
         
         if (self.gdb_macros is not None):
             self.gdb_pexpect.sendline('source ' + self.gdb_macros)
@@ -199,53 +204,39 @@ class RrDebugger(Cmd):
             if (hit[2].startswith('Hardware watchpoint')): # wp hit
                 if (self.is_valid_bt(self.gdb_execute('bt'))):
                     self.print_wp_hit(hit)
-                    #TODO print bt
+                    print ""
+                    self.print_bt(self.gdb_execute('bt'))
                 continue
 
             if (hit[2].startswith('Remote connection closed')):
                 return
 
-    def strip_prefix(self, lin):
-        if (self.vmlinux_strip_prefix is None):
-            return lin
-        else:
-            return "at " + lin.split(self.vmlinux_strip_prefix)[1]
-
     def print_wp_hit(self, gdb_out):
         print ""
         print "\n".join(gdb_out[2:6])
-        for lin in gdb_out[6:]:
-            if (lin.strip().startswith('at')):
-                print self.strip_prefix(lin)
-                break
-            else:
-                print lin
+        for lin in gdb_out[6:7]:
+            print " ".join(lin.split(self.vmlinux_strip_prefix))
 
-    def print_bt(self):
-        print "\n".join(self.gdb_pexpect.before.splitlines()[2:])
+    def print_bt(self, gdb_out):
+        for lin in gdb_out[1:]:
+            split = lin.split(self.vmlinux_strip_prefix)
+            print " ".join(split)
 
-    def do_run_till_live(self, line):
-        '''Run the vm printing all wp hits untill switch to live mode.'''
+    def do_run(self, line):
+        '''Run the vm and stop on wp hit.'''
 
-        count = 0
-        while(count < 5):
-            self.gdb_pexpect.sendline('c')
-            self.gdb_pexpect.expect('\(gdb\)')
+        gdb_out = self.gdb_execute('c')
 
-            gdb_out = self.gdb_pexpect.before.splitlines()
-            if (len(gdb_out) == 3):
-                #qemu process died due to entry into live mode
-                #FIXME this is an assumption
-                break
+        if (len(gdb_out) == 3):
+            #qemu process died due to entry into live mode
+            #FIXME this is an assumption
+            return
 
-            self.print_wp_hit(gdb_out)
-            #TODO enable bt printing
-            #print "Backtrace:"
-            #self.gdb_pexpect.sendline('bt')
-            #self.gdb_pexpect.expect('\(gdb\)')
-            #self.print_bt()
+        #self.gdb_pexpect.interact()
+        self.print_wp_hit(gdb_out)
+        print ""
+        self.print_bt(self.gdb_execute('bt'))
 
-            count += 1
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.ERROR)
