@@ -6,6 +6,7 @@ import pexpect
 import os
 import logging
 import time
+import argparse
 
 class RrDebugger(Cmd):
     def __init__(self):
@@ -238,8 +239,19 @@ class RrDebugger(Cmd):
         self.print_bt(self.gdb_execute('bt'))
 
 
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--debug', action='store_true')
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.ERROR)
+    args = get_args()
+    if (args.debug):
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.ERROR)
+
     dbg = RrDebugger()
     if os.path.exists('.rrdebuginit'):
         dbg.read_init_file('.rrdebuginit')
