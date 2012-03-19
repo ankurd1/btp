@@ -241,7 +241,8 @@ class RrDebugger(Cmd):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--debug', action='store_true')
+    parser.add_argument('-d', '--debug', action='store_true',
+            help='Enable debug logging.')
     return parser.parse_args()
 
 
