@@ -8,6 +8,7 @@ import logging
 import time
 import argparse
 
+
 class RrDebugger(Cmd):
     def __init__(self):
         Cmd.__init__(self)
@@ -32,7 +33,7 @@ class RrDebugger(Cmd):
         f = open(filename, 'r')
         for line in f:
             self.onecmd(line)
-        
+
         logging.info('Init file loaded.')
 
     def do_EOF(self, line):
@@ -67,7 +68,7 @@ class RrDebugger(Cmd):
 
         res = ""
         for lin in gdb_new.before.splitlines()[1:]:
-            res += "".join(lin[lin.find(":")+1:].strip().split())
+            res += "".join(lin[lin.find(":") + 1:].strip().split())
 
         gdb_new.kill(0)
         return res
@@ -120,7 +121,8 @@ class RrDebugger(Cmd):
 
     def do_start(self, line):
         '''Start qemu and attach gdb to it.'''
-        if (self.qemu_process is not None and self.qemu_process.poll() is None):
+        if (self.qemu_process is not None and\
+                self.qemu_process.poll() is None):
             self.qemu_process.kill()
 
         cmd_line = [self.qemu_exec]
@@ -130,28 +132,28 @@ class RrDebugger(Cmd):
 
         logging.debug("qemu cmd_line = " + " ".join(cmd_line))
         self.qemu_process = subprocess.Popen(cmd_line, cwd=self.qemu_cwd,
-                stdout = subprocess.PIPE, stdin = subprocess.PIPE,
-                stderr = subprocess.PIPE)
+                stdout=subprocess.PIPE, stdin=subprocess.PIPE,
+                stderr=subprocess.PIPE)
 
         time.sleep(10)
         #logging.debug(self.qemu_process.stdout.read())
-        
+
         if (self.gdb_pexpect is None):
             self.gdb_pexpect = pexpect.spawn(self.gdb_exec)
             self.gdb_pexpect.expect('\(gdb\)')
 
         self.gdb_init()
-        
+
         if (self.gdb_macros is not None):
             self.gdb_pexpect.sendline('source ' + self.gdb_macros)
             self.gdb_pexpect.expect('\(gdb\)')
-            
+
         #self.gdb_pexpect.interact()
         self.gdb_pexpect.sendline(self.gdb_connect_cmd)
         self.gdb_pexpect.expect('\(gdb\)')
 
         logging.debug(self.gdb_pexpect.before)
-        
+
         #self.gdb_pexpect.interact()
 
     def do_watchk(self, line):
@@ -166,7 +168,7 @@ class RrDebugger(Cmd):
     def is_valid_exec_dump(self, dump):
         res = ""
         for lin in dump[1:]:
-            res += "".join(lin[lin.find(":")+1:].strip().split())
+            res += "".join(lin[lin.find(":") + 1:].strip().split())
 
         return (res == self.executable_start_dump)
 
@@ -201,8 +203,8 @@ class RrDebugger(Cmd):
                         seen_bp = True
                         self.gdb_execute('watch ' + line)
                 continue
-            
-            if (hit[2].startswith('Hardware watchpoint')): # wp hit
+
+            if (hit[2].startswith('Hardware watchpoint')):   # wp hit
                 if (self.is_valid_bt(self.gdb_execute('bt'))):
                     self.print_wp_hit(hit)
                     print ""
