@@ -7,6 +7,7 @@ import os
 import logging
 import time
 import argparse
+import sys
 
 
 class RrDebugger(Cmd):
@@ -131,11 +132,13 @@ class RrDebugger(Cmd):
             self.image])
 
         logging.debug("qemu cmd_line = " + " ".join(cmd_line))
+        null_file = open('/dev/null')
         self.qemu_process = subprocess.Popen(cmd_line, cwd=self.qemu_cwd,
-                stdout=subprocess.PIPE, stdin=subprocess.PIPE,
-                stderr=subprocess.PIPE)
+                stdin=subprocess.PIPE,
+                stderr=null_file)
 
-        time.sleep(10)
+        #return
+        time.sleep(4)
         #logging.debug(self.qemu_process.stdout.read())
 
         if (self.gdb_pexpect is None):
@@ -240,6 +243,34 @@ class RrDebugger(Cmd):
         print ""
         self.print_bt(self.gdb_execute('bt'))
 
+    def do_cont(self, line):
+        self.gdb_pexpect.sendline('c')
+
+    def do_start_tracing(self, line):
+        self.gdb_pexpect.sendcontrol('c')  # Ctrl-C
+        self.gdb_pexpect.expect('\(gdb\)', 9999)
+        logging.debug(self.gdb_pexpect.before)
+
+        disp_out = self.gdb_execute('display/2i $pc')
+        next_addr = disp_out[3].split(':')[0].strip()
+
+        while True:
+            # set bp, cont
+            logging.debug("next_addr = {0}".format(next_addr))
+            self.gdb_execute("del br 1")
+            self.gdb_execute("b *{0}".format(next_addr))
+            disp_out = self.gdb_execute('c')
+            next_addr = disp_out[6].split(':')[0].strip()
+
+    def do_test_gdb_exit(self, line):
+        ins_count = 0
+        print ""
+        while True:
+            if (ins_count % 1000 == 0):
+                sys.stdout.write("Instructions processed = {0}\r".format(ins_count))
+                sys.stdout.flush()
+            ins_count += 1
+            self.gdb_execute('c')
 
 def get_args():
     parser = argparse.ArgumentParser()
