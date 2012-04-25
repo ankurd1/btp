@@ -29,6 +29,8 @@ class RrDebugger(Cmd):
         self.executable = None
         self.gdb_macros = None
         self.executable_start_dump = None
+        self.gdb_running = False
+        self.setup_time = 8
 
     def read_init_file(self, filename):
         f = open(filename, 'r')
@@ -120,7 +122,7 @@ class RrDebugger(Cmd):
         #TODO read these from init file
         self.gdb_execute('set pagination off')
 
-    def do_start(self, line):
+    def do_setup(self, line):
         '''Start qemu and attach gdb to it.'''
         if (self.qemu_process is not None and\
                 self.qemu_process.poll() is None):
@@ -138,7 +140,7 @@ class RrDebugger(Cmd):
                 stderr=null_file)
 
         #return
-        time.sleep(4)
+        time.sleep(self.setup_time)
         #logging.debug(self.qemu_process.stdout.read())
 
         if (self.gdb_pexpect is None):
@@ -245,8 +247,9 @@ class RrDebugger(Cmd):
 
     def do_cont(self, line):
         self.gdb_pexpect.sendline('c')
+        self.gdb_running = True
 
-    def do_start_tracing(self, line):
+    def do_test_start_tracing(self, line):
         self.gdb_pexpect.sendcontrol('c')  # Ctrl-C
         self.gdb_pexpect.expect('\(gdb\)', 9999)
         logging.debug(self.gdb_pexpect.before)
@@ -271,6 +274,60 @@ class RrDebugger(Cmd):
                 sys.stdout.flush()
             ins_count += 1
             self.gdb_execute('c')
+
+    def read_mem(addr, size):
+        words = size / 4
+        if (size % 4 != 0):
+            words += 1
+        data_raw = self.gdb_execute('x/{0} {1}'.format(words, addr))[1:]
+        data = ""
+        for line in data_raw:
+            data += line.split(":")[1].replace("0x", "").replace("\t", "").replace(" ", "")
+
+        if (size % 4 != 0):
+            data = data[:-2 * (4 - (size % 4))]
+
+        return data
+
+    def do_start_tracing(self, line):
+        if (self.gdb_running):
+            self.gdb_pexpect.sendcontrol('c')
+        # enable tracing mode
+        self.gdb_execute('si')
+        # set up display
+        self.gdb_execute('display/i $pc')
+
+        prev_mem_addr = None
+        prev_mem_size = None
+        prev_mem_data = None
+        prev_eip = None
+        prev_bt = None
+
+        while True:
+            # interpret instruction store mem_addr
+            # for the last ins, check mem_addr
+            cur = self.gdb_execute('c')
+            # TODO verify that this is indeed an instruction trap due to our code
+            # process last_ins's stuff
+            if (prev_mem_addr is not None):
+                new_data = self.read_mem(prev_mem_addr, prev_mem_size)
+                if (prev_mem_data != new_data):
+                    self.add_to_db(prev_eip, prev_mem_addr, prev_mem_data,
+                            prev_mem_size, prev_mem_data, new_data, prev_bt)
+
+            # prepare for cur_ins
+            eip = cur[-1].split(":")[0][2:].strip()
+            ins = cur[-1].split(":")[1].split()[0]
+            args = cur[-1].split(":")[1].split()[1]
+            logging.debug("eip={0}, ins={1}, args={2}".format(eip, ins, args))
+            
+            rel_addr, rel_size = self.decode_ins(ins, args)
+            prev_mem_addr = rel_addr
+            prev_mem_size = rel_size
+            prev_mem_data = self.read_mem(rel_addr, rel_size)
+            prev_eip = eip
+            prev_bt = self.gdb_execute('bt') # FIXME format this
+            
 
 def get_args():
     parser = argparse.ArgumentParser()

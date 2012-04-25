@@ -38,4 +38,8 @@ Sem II:
 ------
 -- Trace each instruction
 -- disas, get mem loc, log change
--- Add to sqlite db - mem_addr, (eip, ecx, nbranches), old_data, new_data, bt
+-- Add to sqlite db - mem_addr, eip, timestamp, old_data, new_data, bt
+
+-- query - user supplies var name, get mem_addr from gdb
+         - display everything related to this fromt the db, sorted by
+           (nbranches, ecx)
