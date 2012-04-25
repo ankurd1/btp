@@ -1,0 +1,41 @@
+Functionality we want:
+----------------------
+
+-- show points(with bt and source line nums) where a kernel var was modified
+		-- we need the map file and a var name and vmlinux
+			-- vmlinux is probably a superset of the map file
+        -- we also need path to gdb, path to qemu, qemu args, the qcow file
+
+-- do the above for a user process' global vars
+		-- we need the map file, a var name, the executable, (maybe) pid
+
+
+User Interface:
+---------------
+
+-- Start the script
+   a gdb type console appears
+   you supply the req files using some command
+   now you got two commands: track-kernel and track-user which take the reqd.
+   args
+   
+
+Todo:
+-----
+
+-- show bts
+-- make more robust
+-- fix trivial stuff like more than 5 hits, watchu after watchk, streamline
+their working
+-- More testing
+	-- Make a multithreaded user prog and test on it
+	-- Find more kernel vars
+	-- Run a popular multithreaded app
+
+-- Investigate crash http://mclx.com/projects/crash/
+
+Sem II:
+------
+-- Trace each instruction
+-- disas, get mem loc, log change
+-- Add to sqlite db - mem_addr, (eip, ecx, nbranches), old_data, new_data, bt
