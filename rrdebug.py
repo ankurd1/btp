@@ -368,6 +368,8 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-d', '--debug', action='store_true',
             help='Enable debug logging.')
+    parser.add_argument('-c', '--createdb', action='store_true',
+            help='Create a new database.')
     return parser.parse_args()
 
 
@@ -381,4 +383,14 @@ if __name__ == '__main__':
     dbg = RrDebugger()
     if os.path.exists('.rrdebuginit'):
         dbg.read_init_file('.rrdebuginit')
+    if (args.createdb):
+        dbg.init_db()
+        dbg.setup_db()
+    else:
+        if os.path.exists(dbg.db_file_name):
+            dbg.init_db()
+        else:
+            logging.error("DB file not found.")
+            sys.exit(-1)
+
     dbg.cmdloop()
