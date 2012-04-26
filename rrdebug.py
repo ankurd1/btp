@@ -10,6 +10,7 @@ import argparse
 import sys
 import sqlite3
 import datetime
+import re
 
 
 class RrDebugger(Cmd):
@@ -18,6 +19,9 @@ class RrDebugger(Cmd):
         self.cursor = self.conn.cursor()
 
     def setup_db(self):
+        if (os.path.exists(self.db_file_name)):
+            logging.ERROR('DB already exists! Quitting.')
+            sys.exit(-1)
         # Run queries to create table and index
         self.cursor.execute('CREATE TABLE logs\
                 (eip CHAR(8),\
@@ -66,10 +70,10 @@ class RrDebugger(Cmd):
         self.cursor = None
 
     def add_to_db(self, eip, mem_addr, old_data, mem_size, new_data, bt):
-        tup = (eip, datetime.datetime.now(), mem_addr, old_data, mem_size,
-                new_data, bt)
+        logging.info("Adding to db: {0}".format(locals()))
+        tup = (eip, datetime.datetime.now(), mem_addr, old_data, new_data, bt)
         try:
-            self.cursor.execute('INSERT into log VALUES (?,?,?,?,?,?,?)', tup)
+            self.cursor.execute('INSERT into logs VALUES (?,?,?,?,?,?)', tup)
         except sqlite3.IntegrityError, e:
             logging.error("Database raised exception: {0}".format(str(e)))
 
@@ -80,7 +84,7 @@ class RrDebugger(Cmd):
         for line in f:
             self.onecmd(line)
 
-        logging.info('Init file loaded.')
+        logging.debug('Init file loaded.')
 
     def do_EOF(self, line):
         '''Kill qemu and gdb and exit.'''
@@ -103,7 +107,7 @@ class RrDebugger(Cmd):
     def gdb_execute(self, cmd, timeout=9999):
         self.gdb_pexpect.sendline(cmd)
         self.gdb_pexpect.expect('\(gdb\)', timeout)
-        logging.debug(self.gdb_pexpect.before)
+        logging.debug("gdb_execute: " + cmd + " : " + self.gdb_pexpect.before)
         return self.gdb_pexpect.before.splitlines()
 
     def get_start_dump(self, executable):
@@ -292,10 +296,12 @@ class RrDebugger(Cmd):
         self.gdb_pexpect.sendline('c')
         self.gdb_running = True
 
-    def do_test_start_tracing(self, line):
+    def interrupt(self):
         self.gdb_pexpect.sendcontrol('c')  # Ctrl-C
         self.gdb_pexpect.expect('\(gdb\)', 9999)
-        logging.debug(self.gdb_pexpect.before)
+
+    def do_test_start_tracing(self, line):
+        self.interrupt()
 
         disp_out = self.gdb_execute('display/2i $pc')
         next_addr = disp_out[3].split(':')[0].strip()
@@ -324,6 +330,7 @@ class RrDebugger(Cmd):
         if (size % 4 != 0):
             words += 1
         data_raw = self.gdb_execute('x/{0} 0x{1}'.format(words, addr))[1:]
+        logging.debug("read_mem: raw: {0}".format(data_raw))
         data = ""
         for line in data_raw:
             data += line.split(":")[1].replace("0x", "").replace("\t", "").\
@@ -334,9 +341,69 @@ class RrDebugger(Cmd):
 
         return data
 
+    def hex_add(self, sign, a, b):
+        if (a == ''):
+            a = '0'
+        if (sign == '-'):
+            return hex((int(a, 16) * -1) + int(b, 16))[2:]
+        else:
+            return hex(int(a, 16) + int(b, 16))[2:]
+
+    def read_reg(self, reg):
+        #l = self.gdb_execute('p/x ${0}'.format(reg))
+        #logging.debug("read_reg line: {0}".format(l))
+        return self.gdb_execute('p/x ${0}'.format(reg))[1].\
+                split("=")[1].strip()[2:]
+
+    def decode_ins(self, ins, args):
+        ''' Return the mem_addr/size that this instruction will modify.
+        Return None, None otherwise. '''
+        # NOTE We ignore all stack operations
+        # NOTE All operations are assumed to act on 4 bytes
+        # NOTE Ignoring all rep instructions
+        ignored_ins = set(['cmp', 'ja', 'test', 'call', 'ret', 'pop',
+            'push', 'jne', 'jnz', 'rep', 'jmp', 'ja', 'je', 'jb'])
+        if ins in ignored_ins:
+            return None, None
+
+        if (len(args.split(",")) != 2):
+            logging.info("Args length != 2. Skipping.. {0}: {1}"\
+                    .format(ins, args))
+            return None, None
+        #import pdb; pdb.set_trace()
+        src, dest = args.split(",")
+        logging.debug("Decoding {0}: {1}, {2}".format(ins, src, dest))
+
+        # dest can be reg, immediate or 0x20(%eax) or (blah, blah, blah)
+        # TODO handle case4
+        case1_regex = re.compile("%[a-z]*")
+        case2_regex = re.compile("$0x(.*)")
+        case3_regex = re.compile("(-?)0?x?(.*)\(%([a-z]*)\)")
+
+        mo = case1_regex.match(dest)
+        if (mo is not None):
+            return None, None
+
+        mo = case2_regex.match(dest)
+        if (mo is not None):
+            imm_addr = mo.groups()[0]
+            return imm_addr, 4
+
+        mo = case3_regex.match(dest)
+        if (mo is not None):
+            sign, offset, reg = mo.groups()
+            return self.hex_add(sign, offset, self.read_reg(reg)), 4
+
+        logging.info("Dest format not handled!: {0}: {1}".format(ins, args))
+        return None, None
+
+    def do_interact(self, line):
+        self.interrupt()
+        self.gdb_pexpect.interact()
+
     def do_start_tracing(self, line):
         if (self.gdb_running):
-            self.gdb_pexpect.sendcontrol('c')
+            self.interrupt()
         # enable tracing mode
         self.gdb_execute('si')
         # set up display
@@ -362,18 +429,20 @@ class RrDebugger(Cmd):
                             prev_mem_size, new_data, prev_bt)
 
             # prepare for cur_ins
-            eip, ins, args = self.ins_line_regex.match(cur[-1])
-            #eip = cur[-1].split(":")[0][2:].strip()[2:]
-            #ins = cur[-1].split(":")[1].split()[0]
-            #args = cur[-1].split(":")[1].split()[1]
+            #logging.debug("Ins line: {0}".format(cur[-1]))
+            if (cur[-1].startswith('Cannot access')):
+                continue
+            eip, ins, args = self.ins_line_regex.match(cur[-1]).groups()
             logging.debug("eip={0}, ins={1}, args={2}".format(eip, ins, args))
 
             rel_addr, rel_size = self.decode_ins(ins, args)
             prev_mem_addr = rel_addr
             prev_mem_size = rel_size
-            prev_mem_data = self.read_mem(rel_addr, rel_size)
-            prev_eip = eip
-            prev_bt = self.gdb_execute('bt')  # FIXME format this
+            if (rel_addr is not None):
+                prev_mem_data = self.read_mem(rel_addr, rel_size)
+                prev_eip = eip
+                # FIXME format bt
+                prev_bt = '\n'.join(self.gdb_execute('bt')[2:])
 
 
 def get_args():
