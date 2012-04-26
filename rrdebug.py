@@ -32,24 +32,35 @@ class RrDebugger(Cmd):
 
     def __init__(self):
         Cmd.__init__(self)
+        # Constants
         self.prompt = 'rr_dbg>'
+        self.qemu_replay_keyword = '-replay'
+        self.gdb_connect_cmd = 'target remote localhost:1234'
+        self.setup_time = 8
+
+        # Regexes
+        # '=> 0xc000c000:\tmov\t%eax,0x20(%ebx)\n'
+        self.ins_line_regex = re.compile('.*0x(.*):\s*([a-z]+)\s*(.*)\s*')
+
+        # read from init file
         self.vmlinux = 'vmlinux'
         self.vmlinux_strip_prefix = ''
         self.gdb_exec = '/usr/bin/gdb'
         self.qemu_exec = 'qemu'
         self.qemu_args = ['-s', '-no-reboot']
-        self.qemu_replay_keyword = '-replay'
         self.qemu_replay_file = 'r.log'
-        self.gdb_connect_cmd = 'target remote localhost:1234'
+        self.gdb_macros = None
+        self.executable = None
+        self.qemu_cwd = None
         self.image = None
+
+        # Processes, dynamic data, flags
         self.qemu_process = None
         self.gdb_pexpect = None
-        self.qemu_cwd = None
-        self.executable = None
-        self.gdb_macros = None
         self.executable_start_dump = None
         self.gdb_running = False
-        self.setup_time = 8
+
+        # DB stuff
         self.db_file_name = 'rrdebug.sqlite'
         self.conn = None
         self.cursor = None
@@ -351,9 +362,10 @@ class RrDebugger(Cmd):
                             prev_mem_size, new_data, prev_bt)
 
             # prepare for cur_ins
-            eip = cur[-1].split(":")[0][2:].strip()[2:]
-            ins = cur[-1].split(":")[1].split()[0]
-            args = cur[-1].split(":")[1].split()[1]
+            eip, ins, args = self.ins_line_regex.match(cur[-1])
+            #eip = cur[-1].split(":")[0][2:].strip()[2:]
+            #ins = cur[-1].split(":")[1].split()[0]
+            #args = cur[-1].split(":")[1].split()[1]
             logging.debug("eip={0}, ins={1}, args={2}".format(eip, ins, args))
 
             rel_addr, rel_size = self.decode_ins(ins, args)
