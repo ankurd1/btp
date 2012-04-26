@@ -8,9 +8,28 @@ import logging
 import time
 import argparse
 import sys
+import sqlite3
+import datetime
 
 
 class RrDebugger(Cmd):
+    def init_db(self):
+        self.conn = sqlite3.connect(self.db_file_name)
+        self.cursor = self.conn.cursor()
+
+    def setup_db(self):
+        # Run queries to create table and index
+        self.cursor.execute('CREATE TABLE logs\
+                (eip CHAR(8),\
+                timestamp timestamp,\
+                mem_addr text,\
+                old_data text,\
+                new_data text,\
+                bt text\
+                )')
+        self.cursor.execute('CREATE INDEX eip_index ON logs(eip)')
+        self.conn.commit()
+
     def __init__(self):
         Cmd.__init__(self)
         self.prompt = 'rr_dbg>'
@@ -31,6 +50,19 @@ class RrDebugger(Cmd):
         self.executable_start_dump = None
         self.gdb_running = False
         self.setup_time = 8
+        self.db_file_name = 'rrdebug.sqlite'
+        self.conn = None
+        self.cursor = None
+
+    def add_to_db(self, eip, mem_addr, old_data, mem_size, new_data, bt):
+        tup = (eip, datetime.datetime.now(), mem_addr, old_data, mem_size,
+                new_data, bt)
+        try:
+            self.cursor.execute('INSERT into log VALUES (?,?,?,?,?,?,?)', tup)
+        except sqlite3.IntegrityError, e:
+            logging.error("Database raised exception: {0}".format(str(e)))
+
+        self.conn.commit()
 
     def read_init_file(self, filename):
         f = open(filename, 'r')
@@ -270,19 +302,21 @@ class RrDebugger(Cmd):
         print ""
         while True:
             if (ins_count % 1000 == 0):
-                sys.stdout.write("Instructions processed = {0}\r".format(ins_count))
+                sys.stdout.write("Instructions processed = {0}\r".
+                        format(ins_count))
                 sys.stdout.flush()
             ins_count += 1
             self.gdb_execute('c')
 
-    def read_mem(addr, size):
+    def read_mem(self, addr, size):
         words = size / 4
         if (size % 4 != 0):
             words += 1
-        data_raw = self.gdb_execute('x/{0} {1}'.format(words, addr))[1:]
+        data_raw = self.gdb_execute('x/{0} 0x{1}'.format(words, addr))[1:]
         data = ""
         for line in data_raw:
-            data += line.split(":")[1].replace("0x", "").replace("\t", "").replace(" ", "")
+            data += line.split(":")[1].replace("0x", "").replace("\t", "").\
+            replace(" ", "")
 
         if (size % 4 != 0):
             data = data[:-2 * (4 - (size % 4))]
@@ -307,27 +341,28 @@ class RrDebugger(Cmd):
             # interpret instruction store mem_addr
             # for the last ins, check mem_addr
             cur = self.gdb_execute('c')
-            # TODO verify that this is indeed an instruction trap due to our code
+            # TODO verify that this is indeed an instruction trap due
+            # to our code
             # process last_ins's stuff
             if (prev_mem_addr is not None):
                 new_data = self.read_mem(prev_mem_addr, prev_mem_size)
                 if (prev_mem_data != new_data):
                     self.add_to_db(prev_eip, prev_mem_addr, prev_mem_data,
-                            prev_mem_size, prev_mem_data, new_data, prev_bt)
+                            prev_mem_size, new_data, prev_bt)
 
             # prepare for cur_ins
-            eip = cur[-1].split(":")[0][2:].strip()
+            eip = cur[-1].split(":")[0][2:].strip()[2:]
             ins = cur[-1].split(":")[1].split()[0]
             args = cur[-1].split(":")[1].split()[1]
             logging.debug("eip={0}, ins={1}, args={2}".format(eip, ins, args))
-            
+
             rel_addr, rel_size = self.decode_ins(ins, args)
             prev_mem_addr = rel_addr
             prev_mem_size = rel_size
             prev_mem_data = self.read_mem(rel_addr, rel_size)
             prev_eip = eip
-            prev_bt = self.gdb_execute('bt') # FIXME format this
-            
+            prev_bt = self.gdb_execute('bt')  # FIXME format this
+
 
 def get_args():
     parser = argparse.ArgumentParser()
