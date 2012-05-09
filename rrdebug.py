@@ -32,6 +32,7 @@ class RrDebugger(Cmd):
                 bt text\
                 )')
         self.cursor.execute('CREATE INDEX eip_index ON logs(eip)')
+        self.cursor.execute('CREATE INDEX timestamp ON logs(timestamp)')
         self.conn.commit()
 
     def __init__(self):
