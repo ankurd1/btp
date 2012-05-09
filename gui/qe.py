@@ -100,9 +100,10 @@ class MyFrame(wx.Frame):
                 item[2], item[0]), clientData=item)
 
     def entry_clicked(self, e):
-        selected = self.entries_list_box.GetClientData(self.entries_list_box.\
-                GetSelection())
-        self.display_on_detail_pane(selected)
+        selected_index = self.entries_list_box.GetSelection()
+        if (selected_index != wx.NOT_FOUND):
+            selected = self.entries_list_box.GetClientData(selected_index)
+            self.display_on_detail_pane(selected)
 
     def display_on_detail_pane(self, entry):
         out = "Memory Address:\t{0}\n\
@@ -113,7 +114,16 @@ Backtrace:\t\t\t{4}\n".format(entry[2], entry[0], entry[3], entry[4], entry[5])
         self.detail_pane.SetLabel("Details:\n\n" + out)
 
     def entry_d_clicked(self, e):
-        pass
+        selected = self.entries_list_box.GetClientData(self.entries_list_box.\
+                GetSelection())
+        disp = self.db_search(selected[1], forward=False)
+        past = len(disp)
+        disp.append(selected)
+        disp.extend(self.db_search(selected[1]))
+
+        self.entries_list_box.Set([])
+        self.add_to_entries_list_box(disp)
+        self.entries_list_box.SetSelection(past)
 
     def db_search(self, ts, mem_addr=None, forward=True, limit=50):
         if forward:
