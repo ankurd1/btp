@@ -1,0 +1,11 @@
+search forward/backward from current ins
+    -- get var name from search box, conv to addr using gdb, query for the addr acc to current timestamp, show the results (specific listing)
+    -- double click from specific takes you to general view
+
+specific view
+    -- show ins referring to the same mem_addr
+general view
+    -- show timestamp sorted ins
+
+details abt an ins
+    -- everything from db + source 
