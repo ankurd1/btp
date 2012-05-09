@@ -4,10 +4,6 @@
 
 import wx
 
-# begin wxGlade: extracode
-# end wxGlade
-
-
 
 class MyFrame(wx.Frame):
     def __init__(self, *args, **kwds):
@@ -15,17 +11,26 @@ class MyFrame(wx.Frame):
         kwds["style"] = wx.DEFAULT_FRAME_STYLE
         wx.Frame.__init__(self, *args, **kwds)
         self.text_ctrl_1 = wx.TextCtrl(self, -1, "", style=wx.TE_PROCESS_ENTER)
-        self.button_1 = wx.Button(self, -1, "button_1")
-        self.list_box_1 = wx.ListBox(self, -1, choices=[])
-        self.label_1 = wx.StaticText(self, -1, "label_1")
+        self.button_1 = wx.Button(self, -1, "Search")
+        self.list_box_1 = wx.ListBox(self, -1, choices=[], style=wx.LB_SINGLE)
+        self.label_1 = wx.StaticText(self, -1, "Entry Details")
 
         self.__set_properties()
         self.__do_layout()
+        self.__setup_events()
         # end wxGlade
+
+        self.list_box_1.Append("Ankur")
+        self.list_box_1.Append("Archit")
+        self.list_box_1.Append("Swapnil")
+
+    def __setup_events(self):
+        self.button_1.Bind(wx.EVT_BUTTON, self.search_button_clicked)
+        self.list_box_1.Bind(wx.EVT_LISTBOX, self.entry_selected)
 
     def __set_properties(self):
         # begin wxGlade: MyFrame.__set_properties
-        self.SetTitle("frame_1")
+        self.SetTitle("Query Engine - RRDebug")
         self.text_ctrl_1.SetMinSize((150, 27))
         # end wxGlade
 
@@ -37,6 +42,7 @@ class MyFrame(wx.Frame):
         sizer_2.Add(self.text_ctrl_1, 0, wx.ALL, 0)
         sizer_2.Add(self.button_1, 0, 0, 0)
         sizer_1.Add(sizer_2, 0, wx.ALIGN_RIGHT, 0)
+        sizer_1.Add((-1,20))
         sizer_3.Add(self.list_box_1, 1, wx.ALL|wx.EXPAND, 0)
         sizer_3.Add(self.label_1, 1, wx.ALL|wx.EXPAND, 3)
         sizer_1.Add(sizer_3, 1, wx.EXPAND, 0)
@@ -44,6 +50,15 @@ class MyFrame(wx.Frame):
         sizer_1.Fit(self)
         self.Layout()
         # end wxGlade
+
+    def search_button_clicked(self, e):
+        self.label_1.SetLabel(self.text_ctrl_1.GetValue())
+
+    def entry_selected(self, e):
+        selected = self.list_box_1.GetSelection()
+        self.label_1.SetLabel(self.list_box_1.GetString(selected))
+
+
 
 # end of class MyFrame
 
@@ -53,5 +68,7 @@ if __name__ == "__main__":
     wx.InitAllImageHandlers()
     frame_1 = MyFrame(None, -1, "")
     app.SetTopWindow(frame_1)
+    frame_1.SetSizeHints(800, 600)
     frame_1.Show()
+    frame_1.Maximize()
     app.MainLoop()
