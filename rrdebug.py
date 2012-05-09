@@ -19,9 +19,9 @@ class RrDebugger(Cmd):
         self.cursor = self.conn.cursor()
 
     def setup_db(self):
-        if (os.path.exists(self.db_file_name)):
-            logging.ERROR('DB already exists! Quitting.')
-            sys.exit(-1)
+        #if (os.path.exists(self.db_file_name)):
+            #logging.ERROR('DB already exists! Quitting.')
+            #sys.exit(-1)
         # Run queries to create table and index
         self.cursor.execute('CREATE TABLE logs\
                 (eip CHAR(8),\
@@ -374,7 +374,7 @@ class RrDebugger(Cmd):
         #import pdb; pdb.set_trace()
         src, dest = args.split(",")
         logging.debug("Decoding {0}: {1}, {2}".format(ins, src, dest))
-
+    
         # dest can be reg, immediate or 0x20(%eax) or (blah, blah, blah)
         # TODO handle case4
         case1_regex = re.compile("%[a-z]*")
@@ -393,7 +393,10 @@ class RrDebugger(Cmd):
         mo = case3_regex.match(dest)
         if (mo is not None):
             sign, offset, reg = mo.groups()
-            return self.hex_add(sign, offset, self.read_reg(reg)), 4
+            if reg == 'esp':
+                return None, None
+            else:
+                return self.hex_add(sign, offset, self.read_reg(reg)), 4
 
         logging.info("Dest format not handled!: {0}: {1}".format(ins, args))
         return None, None
@@ -415,6 +418,7 @@ class RrDebugger(Cmd):
         prev_mem_data = None
         prev_eip = None
         prev_bt = None
+        db_count = 1
 
         while True:
             # interpret instruction store mem_addr
@@ -426,8 +430,10 @@ class RrDebugger(Cmd):
             if (prev_mem_addr is not None):
                 new_data = self.read_mem(prev_mem_addr, prev_mem_size)
                 if (prev_mem_data != new_data):
+                    print "Added to db", db_count
                     self.add_to_db(prev_eip, prev_mem_addr, prev_mem_data,
                             prev_mem_size, new_data, prev_bt)
+                    db_count += 1
 
             # prepare for cur_ins
             #logging.debug("Ins line: {0}".format(cur[-1]))
