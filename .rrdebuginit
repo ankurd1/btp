@@ -1,0 +1,8 @@
+set_vmlinux /media/data/vbox/vmlinux-2.6.32-5-openvz-686-deb
+set_vmlinux_strip_prefix /build/buildd-linux-2.6_2.6.32-38-i386-G9QRBd/linux-2.6-2.6.32/debian/build/source_i386_openvz
+set_qemu /home/ankur/projects/btp/kvm-rr/qemu-0.13.0.rr/x86_64-softmmu/qemu-system-x86_64
+set_replay_file r.log
+set_image /media/data/vbox/debian_squeeze_i386_standard.qcow2
+set_qemu_cwd /home/ankur/projects/btp/
+set_gdb /usr/bin/gdb
+set_executable ../test/dbg_test

@@ -1,0 +1,181 @@
+diff -ur kvm-rr/kvm-rr-r80/qemu-0.13.0.rr//gdbstub.c qemu-mod//gdbstub.c
+--- kvm-rr/kvm-rr-r80/qemu-0.13.0.rr//gdbstub.c	2012-05-11 13:16:33.580959734 +0530
++++ qemu-mod//gdbstub.c	2012-05-11 13:14:26.692330533 +0530
+@@ -41,6 +41,8 @@
+ #include "qemu_socket.h"
+ #include "kvm.h"
+ 
++int gdb_ss;
++int gdb_ret_to_gdb;
+ 
+ enum {
+     GDB_SIGNAL_0 = 0,
+@@ -245,6 +247,8 @@
+ }
+ #endif
+ 
++#define DPRINTF(fmt, ...) \
++    do { fprintf(stderr, fmt, ## __VA_ARGS__); } while (0)
+ static int gdb_signal_to_target (int sig)
+ {
+     if (sig < ARRAY_SIZE (gdb_signal_table))
+@@ -1852,9 +1856,15 @@
+                     }
+                     s->c_cpu = env;
+                 }
+-                if (res == 's') {
+-                    cpu_single_step(s->c_cpu, sstep_flags);
+-                }
++				if (res == 's') {
++					//the 'si' command toggles ret_to_gdb mode which
++					//basically means return to gdb after each instruction
++					if (gdb_ret_to_gdb == 1)
++						gdb_ret_to_gdb = 0;
++					else
++						gdb_ret_to_gdb = 1;
++					cpu_single_step(s->c_cpu, sstep_flags);
++				}
+                 s->signal = res_signal;
+                 gdb_continue(s);
+                 return RS_IDLE;
+@@ -2473,6 +2483,7 @@
+ 
+ static void gdb_accept(void)
+ {
++	DPRINTF("in gdb_accept\n");
+     GDBState *s;
+     struct sockaddr_in sockaddr;
+     socklen_t len;
+@@ -2683,6 +2694,7 @@
+     s->chr = chr;
+     s->state = chr ? RS_IDLE : RS_INACTIVE;
+     s->mon_chr = mon_chr;
++	gdb_ss = 1;
+ 
+     return 0;
+ }
+
+diff -ur kvm-rr/kvm-rr-r80/qemu-0.13.0.rr//kvm-all.c qemu-mod//kvm-all.c
+--- kvm-rr/kvm-rr-r80/qemu-0.13.0.rr//kvm-all.c	2012-05-11 13:16:33.572959694 +0530
++++ qemu-mod//kvm-all.c	2012-05-11 13:14:07.756236635 +0530
+@@ -67,6 +67,8 @@
+ } KVMSlot;
+ 
+ typedef struct kvm_dirty_log KVMDirtyLog;
++extern int gdb_ss;
++extern int gdb_ret_to_gdb;
+ 
+ struct KVMState
+ {
+@@ -247,6 +249,8 @@
+     env->kvm_run->prev_ecx_injected = (unsigned long)-1;
+     env->kvm_run->recording_ms_frequency = 0; //0x1;
+     env->kvm_run->recording_ms_threshold = 0; //0xca00;
++    env->kvm_run->compat_threshold = previous_snap + snap_interval;
++    //printf("compat threshold=%lld\n",env->kvm_run->compat_threshold);
+     env->kvm_run->intr_precision = PERFMON_INTR_PRECISION;
+     env->kvm_run->guest_time_sum = 0;
+ 
+@@ -309,12 +313,29 @@
+     }
+   }
+   if (run->replaying_fp) {
+-    if (   (replay_entry.n_branches - run->n_branches) <= run->intr_precision 
+-        && rr_event_is_external(replay_entry.type)) {
+-      run->rr_single_stepping_mode = 1;
++	  if (gdb_ret_to_gdb == 1) {
++	  /*if (1) {*/
++		  /*DPRINTF("gdb_attached was 1\n");*/
++		  run->rr_single_stepping_mode = 1;
++	  } else {
++		  /*DPRINTF("gdb_attached was 0\n");*/
++		  if (   (replay_entry.n_branches - run->n_branches) <= run->intr_precision 
++				  && rr_event_is_external(replay_entry.type)) {
++			  run->rr_single_stepping_mode = 1;
++		  }
++	  }
++  }
++
++  if (compat || rr_fault) {
++    if (run->replaying_fp && take_snap >= run->n_branches) {
++      if (take_snap - run->n_branches <= run->intr_precision) {
++        run->rr_single_stepping_mode = 1;
++      }
+     }
+   }
+-
++  if (rr_fault_single_step) {
++    run->rr_single_stepping_mode = 1;
++  }
+   if (run->rr_single_stepping_mode) {
+     cpu_single_step(env, 1);
+   } else {
+@@ -1498,6 +1519,7 @@
+   }
+ }
+ 
++long ins_count;
+ 
+ int kvm_cpu_exec(CPUState *env)
+ {
+@@ -1506,7 +1528,7 @@
+     unsigned long long other_start_time, other_stop_time;
+     //unsigned long long mmio_start_time, mmio_stop_time;
+     int ret;
+-
++    static uint32_t prev_eip;
+     //printf("%s() %d:\n", __func__, __LINE__);
+     do {
+ #ifndef CONFIG_IOTHREAD
+@@ -1555,6 +1577,22 @@
+         kvm_arch_pre_run(env, run);
+         cpu_single_env = NULL;
+         qemu_mutex_unlock_iothread();
++
++        if (((compat || rr_fault) && run->n_branches >= take_snap) 
++                            || rr_fault_single_step) {
++          if (env->eip != prev_eip) {
++            prev_eip =env->eip;
++            if (rr_fault) {
++              rr_fault_single_step = true;
++            }
++            if (run->n_branches > take_snap) {
++              //ASSERT(0);
++            }
++            env->exit_request = 1;
++            break;
++          }
++        }
++
+         kernel_entry_time = rdtsc();
+         ret = kvm_vcpu_ioctl(env, KVM_RUN, 0);
+         kernel_exit_time = rdtsc();
+@@ -1566,6 +1604,9 @@
+         stats_num_kernel_entries++;
+ 
+         stats_exit_reason(run->exit_reason);
++		ins_count++;
++		/*DPRINTF("ins_count=%ld, gdb_ss=%d, gdb_ret=%d\n", ins_count, gdb_ss, gdb_ret_to_gdb);*/
++		/*DPRINTF("eip = %p, exit_reason=%d\n", env->eip, run->exit_reason);*/
+ 
+         //4.45
+         kvm_arch_get_registers(env);
+@@ -1677,7 +1718,6 @@
+             break;
+         case KVM_EXIT_DEBUG:
+             //printf("kvm_exit_debug\n");
+-        print_debug_info();
+ #ifdef KVM_CAP_SET_GUEST_DEBUG
+             if (kvm_arch_debug(&run->debug.arch)) {
+                 env->exception_index = EXCP_DEBUG;
+@@ -1697,6 +1737,10 @@
+         }
+         other_stop_time = rdtsc();
+         stats_other_time_sum += other_stop_time - other_start_time;
++		if (gdb_ret_to_gdb == 1) {
++			env->exception_index = EXCP_DEBUG;
++			return 0;
++		}
+     } while (ret > 0);
+ 
+     if (env->exit_request) {
